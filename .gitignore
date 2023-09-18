@@ -1,6 +1,4 @@
 /target
-asm/build_asm.sh
-asm/run.sh
-asm/test
-asm/test.asm
-asm/test.o
+asm/*
+test_source/*
+.vscode/*
