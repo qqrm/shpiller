@@ -1,15 +1,12 @@
-use std::{alloc::System, env, error::Error, fs, path::Path, process::Command};
+pub mod generator;
+pub mod parser;
+pub mod tokenizer;
 
-/// Represents the types of tokens that can be produced by the lexer.
-#[derive(Debug, PartialEq)]
-enum TokenType {
-    /// Represents the 'return' keyword.
-    Return,
-    /// Represents an integer literal.
-    IntLiteral(i32),
-    /// Represents the ';' symbol.
-    Semicolon,
-}
+use std::{env, error::Error, fs, path::Path, process::Command};
+
+use generator::Generator;
+use parser::Parser;
+use tokenizer::{Token, Tokenizer};
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Collect command line arguments into a vector.
@@ -31,110 +28,60 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err("Input file is empty".into());
     }
 
-    // Tokenize the file content.
-    let tokens = tokenize(&file_content); // Pass a &str
+    let tokenizer = Tokenizer::new(file_content);
 
-    // Convert tokens to assembly language.
-    let asm = tokens_to_asm(tokens);
-    dbg!(&asm);
+    // Tokenize the file content.
+    let tokens = tokenizer.tokenize();
+
+    let mut parser = Parser::new(tokens);
+
+    let tree = parser.parse();
+
+    if tree.is_none() {
+        panic!("No exit statement found");
+    }
+
+    let generator = Generator::new(tree.unwrap());
 
     let out_path = Path::new(file_path).with_extension("asm");
-    // let output = fs::File::create()?;
-    fs::write(out_path.clone(), asm)?;
+    fs::write(&out_path, generator.generate())?;
 
-    // Assemble the file using NASM
-    let status_nasm = Command::new("nasm")
-        .arg("-felf64")
-        .arg(&out_path)
-        .status()?; // Returns the exit status of the command
+    assemble_and_link(&out_path)?;
+
+    Ok(())
+}
+
+/// Assembles and links the generated assembly file using `nasm` and `ld`.
+///
+/// # Arguments
+///
+/// * `asm_path` - Path to the generated assembly file.
+///
+/// # Returns
+///
+/// * `Result<()>` - Ok if the assembly and linking processes succeed, Err otherwise.
+fn assemble_and_link(asm_path: &Path) -> Result<(), Box<dyn Error>> {
+    // Assemble the file using NASM.
+    let status_nasm = Command::new("nasm").arg("-felf64").arg(asm_path).status()?;
 
     if !status_nasm.success() {
         return Err("Failed to assemble the code with NASM.".into());
     }
 
-    let o_path = out_path.with_extension("o");
-    let path = format!("{}", out_path.with_extension("").display()); // Get the file path without any extension
+    // Prepare paths for linking.
+    let o_path = asm_path.with_extension("o");
+    let exec_path = format!("{}", asm_path.with_extension("").display());
 
-    // Link the object file using ld
+    // Link the object file using ld.
     let status_ld = Command::new("ld")
         .arg(&o_path)
         .arg("-o")
-        .arg(&path)
-        .status()?; // Returns the exit status of the command
+        .arg(&exec_path)
+        .status()?;
 
     if !status_ld.success() {
         return Err("Failed to link the object file.".into());
     }
 
     Ok(())
-}
-
-/// Convert a list of tokens into assembly language representation.
-///
-/// # Arguments
-///
-/// * `tokens` - A vector of tokens to be converted to assembly.
-///
-/// # Returns
-///
-/// A string containing the assembly language representation of the tokens.
-fn tokens_to_asm(tokens: Vec<TokenType>) -> String {
-    tokens
-        .into_iter()
-        .map(|token| -> String {
-            match token {
-                TokenType::Return => "    mov rax, 60\n    mov rdi, ".to_string(),
-                TokenType::IntLiteral(value) => value.to_string(),
-                TokenType::Semicolon => "\n    syscall\n".to_string(),
-            }
-        })
-        .fold(
-            String::from("global _start\n_start:\n"),
-            |out, token_asm| out + &token_asm,
-        )
-}
-
-/// Tokenize the given input into a list of `TokenType` values.
-///
-/// # Arguments
-///
-/// * `input` - A string slice containing the source code to tokenize.
-///
-/// # Returns
-///
-/// A vector of tokens representing the source code.
-fn tokenize(input: &str) -> Vec<TokenType> {
-    let mut tokens = Vec::new();
-    let mut current_token = String::new();
-
-    for ch in input.chars() {
-        match ch {
-            ' ' | ';' => {
-                if !current_token.is_empty() {
-                    if current_token == "return" {
-                        tokens.push(TokenType::Return);
-                    } else if let Ok(value) = current_token.parse::<i32>() {
-                        tokens.push(TokenType::IntLiteral(value));
-                    }
-
-                    current_token.clear();
-                }
-
-                if ch == ';' {
-                    tokens.push(TokenType::Semicolon);
-                }
-            }
-            _ => current_token.push(ch),
-        }
-    }
-
-    if !current_token.is_empty() {
-        if current_token == "return" {
-            tokens.push(TokenType::Return);
-        } else if let Ok(value) = current_token.parse::<i32>() {
-            tokens.push(TokenType::IntLiteral(value));
-        }
-    }
-
-    tokens
 }
