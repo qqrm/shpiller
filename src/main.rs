@@ -28,9 +28,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err("Input file is empty".into());
     }
 
-    let tokenizer = Tokenizer::new(file_content);
-
     // Tokenize the file content.
+    let tokenizer = Tokenizer::new(file_content);
     let tokens = tokenizer.tokenize();
 
     let mut parser = Parser::new(tokens);
